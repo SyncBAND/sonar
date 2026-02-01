@@ -446,7 +446,7 @@ class TSOPublicationsScraper(BaseScraper):
         # ── European TSO bodies (direct RSS where available) ──
         "entsoe": {
             "name": "ENTSO-E",
-            "rss_url": "https://www.entsoe.eu/news-events/feed/",
+            "rss_url": "https://www.entsoe.eu/rss/news.xml",
             "google_news_query": '"ENTSO-E" grid OR electricity OR transmission OR regulation',
             "quality_score": 0.95,
         },
