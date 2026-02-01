@@ -1,0 +1,20 @@
+{
+  "_comment": "AHP pairwise comparisons for MCDA weight derivation. Edit comparisons and restart to change weights.",
+  "_saaty_scale": "1=equal, 3=moderate, 5=strong, 7=very strong, 9=extreme. Use 1/N if second criterion is more important.",
+  "profile": "default",
+  "comparisons": {
+    "strategic_importance_vs_evidence_strength": 2,
+    "strategic_importance_vs_growth_momentum": 3,
+    "strategic_importance_vs_maturity_readiness": 2,
+    "evidence_strength_vs_growth_momentum": 2,
+    "evidence_strength_vs_maturity_readiness": 1,
+    "growth_momentum_vs_maturity_readiness": 1
+  },
+  "computed_weights": {
+    "strategic_importance": 0.4258,
+    "evidence_strength": 0.2312,
+    "growth_momentum": 0.1484,
+    "maturity_readiness": 0.1945
+  },
+  "consistency_ratio": 0.017
+}
