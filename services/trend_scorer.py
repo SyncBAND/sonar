@@ -84,16 +84,16 @@ AMPRION_STRATEGIC_PRIORS: Dict[str, Dict[str, Any]] = {
         "tier": "high",
         "rationale": "Core TSO mission — managing renewable feed-in.",
     },
+    "regulatory_policy": {
+        "weight": 80, "risk": "MEDIUM", "stability": 50,
+        "tier": "high",
+        "rationale": "Enables/constrains all other categories.",
+    },
     "energy_storage": {
         "weight": 78, "risk": "MEDIUM", "stability": 75,
         "tier": "high",
         "rationale": "HIGH. Grid Boosters. Congestion relief.",
         "default_projects": ["Grid Boosters"],
-    },
-    "e_mobility_v2g": {
-        "weight": 72, "risk": "MEDIUM", "stability": 40,
-        "tier": "high",
-        "rationale": "HIGH. New load patterns, bidirectional flows.",
     },
     "ai_grid_optimization": {
         "weight": 72, "risk": "MEDIUM", "stability": 55,
@@ -109,15 +109,15 @@ AMPRION_STRATEGIC_PRIORS: Dict[str, Dict[str, Any]] = {
         "rationale": "HIGH for Ruhr region. Sector coupling via hybridge.",
         "default_projects": ["hybridge"],
     },
-    "regulatory_policy": {
-        "weight": 70, "risk": "LOW", "stability": 20,
-        "tier": "medium-high",
-        "rationale": "Enables/constrains all other categories.",
-    },
     "energy_trading": {
         "weight": 65, "risk": "LOW", "stability": 25,
         "tier": "medium-high",
         "rationale": "Market operations, Systemmarkt evolution.",
+    },
+    "e_mobility_v2g": {
+        "weight": 62, "risk": "MEDIUM", "stability": 20,
+        "tier": "medium-high",
+        "rationale": "HIGH. New load patterns, bidirectional flows.",
     },
 
     # ── MEDIUM tier: Watch and track ──────────────────────────────────────
@@ -487,19 +487,14 @@ class TrendScorer:
         """
         Measure growth velocity using 14-day comparison windows.
 
-        Handles first-run/cold-start correctly:
+        FIRST RUN / COLD START HANDLING:
         ─────────────────────────────────────────
-        RSS feeds naturally carry more recent articles.  On a cold start
-        (first scrape), nearly all content is ≤14 days old.  This is
-        editorial recency bias, NOT market growth.
+        On first run, ALL signals are scraped within minutes/hours.
+        RSS feeds contain articles from different dates, but this is
+        NOT real growth - it's just the backlog from first scrape.
 
-        Detection heuristics:
-          1. All signals scraped within a 2-day window → cold start
-          2. recent : (previous + older) ratio > 8:1 → thin baseline
-          3. Baseline < 3 signals → not enough to measure
-
-        In these cases we return a NEUTRAL score (50) so growth
-        contributes 0 to priority and does not distort rankings.
+        We detect cold-start by checking if all signals were scraped
+        within a 24-hour window. If so, growth_rate = 0 (unknown).
         """
         now = datetime.utcnow()
 
@@ -535,29 +530,34 @@ class TrendScorer:
 
         total_dated = recent + previous + older
 
-        # ── Cold-start detection ──────────────────────────────────
+        # ── STRICT Cold-start detection ──────────────────────────────
+        # If all signals were scraped within 24 hours, this is FIRST RUN
+        is_first_run = False
+        if len(scrape_dates) >= 2:
+            scrape_span = (max(scrape_dates) - min(scrape_dates)).total_seconds()
+            if scrape_span < 24 * 3600:  # < 24 hours = first run
+                is_first_run = True
+        elif len(scrape_dates) <= 1:
+            is_first_run = True  # Single scrape or no scrape dates
+
+        # FIRST RUN: Return neutral score with 0% growth rate
+        if is_first_run:
+            # Return neutral growth score (50) and 0% rate
+            # This means growth contributes nothing to ranking on first run
+            return 50.0, 0.0
+
+        # ── Normal multi-day operation ───────────────────────────────
         if total_dated == 0:
             return 50.0, 0.0
 
-        # Heuristic 1: all signals scraped within a 2-day window
-        # (single batch scrape → first run)
-        is_cold_start = False
-        if len(scrape_dates) >= 2:
-            scrape_span = (max(scrape_dates) - min(scrape_dates)).total_seconds()
-            if scrape_span < 2 * 86400:  # < 2 days
-                is_cold_start = True
-
-        # Heuristic 2: no baseline at all
+        # No baseline at all (shouldn't happen after first run)
         if previous == 0 and older == 0:
             return 50.0, 0.0
 
-        baseline = previous if previous > 0 else max(older / 4, 0.5)
+        baseline = previous if previous > 0 else max(older / 4, 1)
 
-        # Heuristic 3: baseline too thin OR cold start
-        # Need ≥3 signals in baseline and recent:baseline ratio ≤ 8:1
-        if is_cold_start or baseline < 3:
-            # Still compute a mild indicator from what we have,
-            # but cap the growth score to prevent inflation
+        # Baseline too thin - need at least 3 signals in baseline
+        if baseline < 3:
             if baseline > 0:
                 raw_rate = ((recent - baseline) / baseline) * 100
             else:

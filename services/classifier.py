@@ -397,10 +397,16 @@ class LLMClassifier:
     return the same dict shape. Drop-in replacement.
 
     Set CLASSIFIER_LLM_PROVIDER env var to enable:
-        "anthropic"  → uses Claude via Anthropic SDK
-        "openai"     → uses GPT via OpenAI SDK
+        "anthropic"   → uses Claude via Anthropic SDK
+        "openai"      → uses GPT via OpenAI SDK
+        "selfhosted"  → uses self-hosted LLM (Ollama, vLLM, llama.cpp, etc.)
 
-    Requires the corresponding API key env var:
+    For selfhosted, also set:
+        SELFHOSTED_LLM_PROVIDER=ollama|vllm|llamacpp|textgen|localai|lmstudio|custom
+        SELFHOSTED_LLM_URL=http://localhost:11434
+        SELFHOSTED_LLM_MODEL=llama3.2:8b
+
+    Requires the corresponding API key env var for commercial:
         ANTHROPIC_API_KEY or OPENAI_API_KEY
     """
 
@@ -418,6 +424,7 @@ class LLMClassifier:
 
         self._category_ids = list(taxonomy.keys())
         self._client = None
+        self._selfhosted_llm = None
         self._model = model
 
         if provider == "anthropic":
@@ -428,8 +435,15 @@ class LLMClassifier:
             import openai
             self._client = openai.OpenAI()
             self._model = model or "gpt-4o-mini"
+        elif provider == "selfhosted":
+            from services.selfhosted_llm import get_selfhosted_llm
+            self._selfhosted_llm = get_selfhosted_llm()
+            if not self._selfhosted_llm:
+                raise ValueError("Self-hosted LLM not available. Check SELFHOSTED_LLM_* env vars.")
+            self._model = self._selfhosted_llm.config.model
+            self.backend_name = f"LLM(selfhosted:{self._selfhosted_llm.config.provider})"
         else:
-            raise ValueError(f"Unknown LLM provider: {provider}")
+            raise ValueError(f"Unknown LLM provider: {provider}. Use: anthropic, openai, or selfhosted")
 
         # Build the system prompt once
         self._system_prompt = self._build_system_prompt()
@@ -496,6 +510,14 @@ class LLMClassifier:
                 ],
             )
             return resp.choices[0].message.content
+        elif self.provider == "selfhosted":
+            response = self._selfhosted_llm.complete(
+                prompt=f"Classify this signal:\n\n{text[:2000]}",
+                system_prompt=self._system_prompt
+            )
+            if not response:
+                raise RuntimeError("Self-hosted LLM returned empty response")
+            return response
         raise RuntimeError(f"Unknown provider: {self.provider}")
 
     def _parse_response(self, raw: str) -> Dict[str, Any]:
@@ -598,10 +620,16 @@ def get_classifier() -> Any:
     Get (or lazily create) the default classifier.
 
     Priority:
-        1. LLM (if CLASSIFIER_LLM_PROVIDER is set + API key available)
+        1. LLM (if CLASSIFIER_LLM_PROVIDER is set + API key/server available)
            → wrapped in CascadingClassifier with SentenceTransformer fallback
         2. SentenceTransformer (if sentence-transformers installed)
         3. TF-IDF (scikit-learn fallback)
+    
+    LLM providers:
+        - anthropic: Claude via Anthropic API (requires ANTHROPIC_API_KEY)
+        - openai: GPT via OpenAI API (requires OPENAI_API_KEY)
+        - selfhosted: Local LLM via Ollama, vLLM, llama.cpp, etc.
+          (requires SELFHOSTED_LLM_PROVIDER and SELFHOSTED_LLM_URL)
     """
     global _default_classifier
     if _default_classifier is not None:
@@ -620,7 +648,7 @@ def get_classifier() -> Any:
 
     # Check if LLM classifier is requested
     llm_provider = os.getenv("CLASSIFIER_LLM_PROVIDER", "").strip().lower()
-    if llm_provider in ("anthropic", "openai"):
+    if llm_provider in ("anthropic", "openai", "selfhosted"):
         try:
             llm = LLMClassifier(
                 taxonomy=CATEGORIES,
@@ -629,9 +657,9 @@ def get_classifier() -> Any:
                 model=os.getenv("CLASSIFIER_LLM_MODEL"),
             )
             _default_classifier = CascadingClassifier(primary=llm, fallback=local)
-            log.info("Using cascading classifier: LLM primary, local fallback")
+            log.info("Using cascading classifier: LLM (%s) primary, local fallback", llm_provider)
         except Exception as e:
-            log.warning("Failed to init LLM classifier (%s), using local only", e)
+            log.warning("Failed to init LLM classifier (%s), using local only: %s", llm_provider, e)
             _default_classifier = local
     else:
         _default_classifier = local

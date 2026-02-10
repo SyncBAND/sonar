@@ -480,6 +480,28 @@ def get_last_ahp_result() -> Optional[Dict[str, Any]]:
     return _cached_ahp_result
 
 
+def _get_active_profile_name() -> str:
+    """
+    Get the name of the currently active AHP profile.
+    
+    Returns the profile name based on:
+    1. AHP_PROFILE environment variable if set
+    2. 'custom' if using ahp_config.json file
+    3. 'default' otherwise
+    """
+    # Check if config file exists and has comparisons
+    config = load_ahp_config()
+    if config and "comparisons" in config:
+        return "custom (ahp_config.json)"
+    
+    # Check environment variable or default
+    profile_name = os.getenv("AHP_PROFILE", "default")
+    if profile_name in AHP_PROFILES:
+        return profile_name
+    
+    return "default"
+
+
 def compute_profile_weights(profile_name: str) -> Dict[str, Any]:
     """Compute weights for a named profile. For comparison/UI."""
     if profile_name not in AHP_PROFILES:
